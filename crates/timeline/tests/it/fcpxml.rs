@@ -208,6 +208,27 @@ fn hostile_lane_numbers_do_not_create_sparse_tracks() {
     assert!(rep.has_warnings());
 }
 
+#[test]
+fn invalid_connected_lane_is_reported() {
+    let d = doc().replace("lane=\"1\"", "lane=\"1.5\"");
+    let (_, report) = import(d.as_bytes(), Format::Fcpxml, None).unwrap();
+    assert!(report.mentions("invalid lane \"1.5\""), "{report}");
+}
+
+#[test]
+fn video_conform_defaults_to_fit_and_explicit_none_round_trips() {
+    let (fit, _) = import(doc().as_bytes(), Format::Fcpxml, None).unwrap();
+    assert!(fit.project.sequence(only_seq(&fit)).unwrap().video_tracks[0].items[0].scale_to_frame);
+
+    let d = doc().replace("<adjust-transform position=", "<adjust-conform type=\"none\"/><adjust-transform position=");
+    let (native, _) = import(d.as_bytes(), Format::Fcpxml, None).unwrap();
+    let seq = only_seq(&native);
+    assert!(!native.project.sequence(seq).unwrap().video_tracks[0].items[0].scale_to_frame);
+    let (round_trip, xml, _) = roundtrip(&native.project, seq, Format::Fcpxml, &xopts());
+    assert!(xml.contains("<adjust-conform type=\"none\"/>"));
+    assert!(!round_trip.project.sequence(only_seq(&round_trip)).unwrap().video_tracks[0].items[0].scale_to_frame);
+}
+
 /// Final Cut writes slideshow stills directly as video elements, including zero-duration assets.
 #[test]
 fn standalone_video_stills_keep_timing_paths_and_transitions() {

@@ -665,7 +665,11 @@ impl<'a> Imp<'a, '_, '_> {
         }
         // Connected clips and secondary storylines.
         for c in elements(el) {
-            let Some(l) = c.attribute("lane").and_then(|l| l.parse::<i32>().ok()) else { continue };
+            let Some(raw_lane) = c.attribute("lane") else { continue };
+            let Ok(l) = raw_lane.trim().parse::<i32>() else {
+                self.report.warn_limited(self.report_limit, format!("<{}> has invalid lane \"{raw_lane}\"; skipped", c.name()));
+                continue;
+            };
             let off = attr_time(c, "offset").unwrap_or(Tick::ZERO);
             let ct0 = t0 + (off - local_start);
             let clane = if lane > 0 && l > 0 { lane.saturating_add(l) } else { l };
@@ -711,6 +715,21 @@ impl<'a> Imp<'a, '_, '_> {
         let kt = |t: Tick| src_in + scaled(t - local_start, speed);
         let (fw, fh) = (ctx.frame.0 as f64, ctx.frame.1 as f64);
         let _ = ctx.seq_rate;
+        if kind == TrackKind::Video {
+            // The wrapper's adjustment overrides one carried by the wrapped video.
+            let conform = child(el, "adjust-conform").or_else(|| {
+                if !el.has_tag_name("clip") {
+                    return None;
+                }
+                let inner = elements(el).find(|c| matches!(c.name(), "video" | "asset-clip") && c.attribute("ref").is_some())?;
+                child(inner, "adjust-conform")
+            });
+            let mode = conform.and_then(|a| a.attribute("type")).unwrap_or("fit");
+            ti.scale_to_frame = mode != "none";
+            if mode == "fill" {
+                self.report.warn_limited(self.report_limit, "adjust-conform \"fill\" is not supported; the clip was fitted to the frame instead");
+            }
+        }
         for a in elements(el) {
             match (a.name(), kind) {
                 ("adjust-transform", TrackKind::Video) => {
@@ -1255,6 +1274,9 @@ impl Exp<'_, '_> {
             if it.speed == 0.0 || it.frame_hold.is_some() { local } else { local + Tick(((t - it.source_in).0 as f64 / it.speed).round() as i64) }
         };
         if kind == TrackKind::Video {
+            if !it.scale_to_frame {
+                children.push("<adjust-conform type=\"none\"/>".into());
+            }
             self.transform(it, seq, &to_local, &mut children);
         }
         if let Some(a) = audio.or((kind == TrackKind::Audio).then_some(it)) {
